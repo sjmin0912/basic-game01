@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>피하기 게임 - 1주차 예시</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .game-container {
+            text-align: center;
+        }
+
+        .game-info {
+            display: flex;
+            justify-content: space-between;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px 15px 0 0;
+            color: white;
+            font-size: 18px;
+        }
+
+        .game-info span {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #gameCanvas {
+            border: 3px solid #4a9eff;
+            border-radius: 0 0 15px 15px;
+            background: linear-gradient(180deg, #0f0f23 0%, #1a1a3e 100%);
+        }
+
+        .overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 40px 60px;
+            border-radius: 20px;
+            text-align: center;
+            color: white;
+            display: none;
+            border: 2px solid #4a9eff;
+            box-shadow: 0 0 30px rgba(74, 158, 255, 0.3);
+        }
+
+        .overlay h2 {
+            font-size: 32px;
+            margin-bottom: 15px;
+        }
+
+        .overlay p {
+            font-size: 18px;
+            margin-bottom: 25px;
+            color: #aaa;
+        }
+
+        .overlay button {
+            padding: 15px 40px;
+            font-size: 18px;
+            background: linear-gradient(135deg, #4a9eff 0%, #6c5ce7 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .overlay button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(74, 158, 255, 0.4);
+        }
+
+        #startScreen h2 {
+            color: #4a9eff;
+        }
+
+        #gameOverScreen h2 {
+            color: #ff6b6b;
+        }
+
+        #clearScreen h2 {
+            color: #51cf66;
+        }
+
+        .instructions {
+            margin-top: 20px;
+            color: white;
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        .score-display {
+            color: #ffd43b;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="game-info">
+            <span>⏱️ 시간: <span id="timer">30</span>초</span>
+            <span class="score-display">⭐ 점수: <span id="score">0</span></span>
+        </div>
+        <canvas id="gameCanvas" width="480" height="640"></canvas>
+        
+        <!-- 시작 화면 -->
+        <div id="startScreen" class="overlay">
+            <h2>🎮 피하기 게임</h2>
+            <p>떨어지는 장애물을 피해 30초간 생존하세요!</p>
+            <button onclick="startGame()">게임 시작</button>
+            <div class="instructions">
+                ← → 방향키로 이동
+            </div>
+        </div>
+
+        <!-- 게임오버 화면 -->
+        <div id="gameOverScreen" class="overlay">
+            <h2>💥 게임오버!</h2>
+            <p>생존 시간: <span id="survivalTime">0</span>초</p>
+            <button onclick="restartGame()">다시 시작</button>
+        </div>
+
+        <!-- 클리어 화면 -->
+        <div id="clearScreen" class="overlay">
+            <h2>🎉 클리어!</h2>
+            <p>30초 생존 성공! 점수: <span id="finalScore">0</span></p>
+            <button onclick="restartGame()">다시 하기</button>
+        </div>
+    </div>
+
+    <script>
+        // ========================================
+        // 🎮 게임 기본 설정
+        // ========================================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 게임 상태
+        let gameRunning = false;
+        let gameTime = 30;
+        let score = 0;
+        let timerInterval;
+
+        // ========================================
+        // 🏃 플레이어 설정 (입력)
+        // ========================================
+        const player = {
+            x: canvas.width / 2 - 25,
+            y: canvas.height - 80,
+            width: 50,
+            height: 50,
+            speed: 8,
+            color: '#4a9eff'
+        };
+
+        // 키보드 입력 상태
+        const keys = {
+            left: false,
+            right: false
+        };
+
+        // ========================================
+        // 🧱 장애물 설정 (조건/충돌)
+        // ========================================
+        let obstacles = [];
+        const obstacleConfig = {
+            width: 40,
+            height: 40,
+            speed: 4,
+            spawnRate: 60,  // 프레임마다 생성 확률 체크
+            color: '#ff6b6b'
+        };
+        let frameCount = 0;
+
+        // ========================================
+        // ⌨️ 키보드 이벤트 (입력 처리)
+        // ========================================
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+        });
+
+        // ========================================
+        // 🎯 충돌 감지 함수 (조건)
+        // ========================================
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        // ========================================
+        // 🎮 게임 로직
+        // ========================================
+        
+        // 플레이어 이동
+        function movePlayer() {
+            if (keys.left && player.x > 0) {
+                player.x -= player.speed;
+            }
+            if (keys.right && player.x < canvas.width - player.width) {
+                player.x += player.speed;
+            }
+        }
+
+        // 장애물 생성
+        function spawnObstacle() {
+            frameCount++;
+            if (frameCount >= obstacleConfig.spawnRate) {
+                frameCount = 0;
+                const obstacle = {
+                    x: Math.random() * (canvas.width - obstacleConfig.width),
+                    y: -obstacleConfig.height,
+                    width: obstacleConfig.width,
+                    height: obstacleConfig.height,
+                    speed: obstacleConfig.speed + Math.random() * 2
+                };
+                obstacles.push(obstacle);
+            }
+        }
+
+        // 장애물 이동 및 충돌 체크
+        function updateObstacles() {
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].y += obstacles[i].speed;
+
+                // 충돌 체크 → 게임오버
+                if (checkCollision(player, obstacles[i])) {
+                    gameOver();
+                    return;
+                }
+
+                // 화면 밖으로 나간 장애물 제거 + 점수
+                if (obstacles[i].y > canvas.height) {
+                    obstacles.splice(i, 1);
+                    score += 10;
+                    updateScore();
+                }
+            }
+        }
+
+        // ========================================
+        // 🎨 그리기 함수
+        // ========================================
+        function draw() {
+            // 배경 클리어
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 플레이어 그리기 (귀여운 캐릭터)
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.roundRect(player.x, player.y, player.width, player.height, 10);
+            ctx.fill();
+            
+            // 플레이어 눈
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(player.x + 15, player.y + 18, 8, 0, Math.PI * 2);
+            ctx.arc(player.x + 35, player.y + 18, 8, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#1a1a2e';
+            ctx.beginPath();
+            ctx.arc(player.x + 15, player.y + 18, 4, 0, Math.PI * 2);
+            ctx.arc(player.x + 35, player.y + 18, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 장애물 그리기
+            ctx.fillStyle = obstacleConfig.color;
+            obstacles.forEach(obs => {
+                ctx.beginPath();
+                ctx.roundRect(obs.x, obs.y, obs.width, obs.height, 8);
+                ctx.fill();
+                
+                // 장애물 무늬
+                ctx.fillStyle = '#ff8787';
+                ctx.fillRect(obs.x + 10, obs.y + 10, 20, 5);
+                ctx.fillRect(obs.x + 10, obs.y + 20, 20, 5);
+                ctx.fillStyle = obstacleConfig.color;
+            });
+        }
+
+        // ========================================
+        // 🔄 게임 루프
+        // ========================================
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            movePlayer();
+            spawnObstacle();
+            updateObstacles();
+            draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ========================================
+        // 📊 UI 업데이트
+        // ========================================
+        function updateTimer() {
+            document.getElementById('timer').textContent = gameTime;
+        }
+
+        function updateScore() {
+            document.getElementById('score').textContent = score;
+        }
+
+        // ========================================
+        // 🎬 게임 상태 관리 (엔딩)
+        // ========================================
+        function startGame() {
+            document.getElementById('startScreen').style.display = 'none';
+            gameRunning = true;
+            gameTime = 30;
+            score = 0;
+            obstacles = [];
+            player.x = canvas.width / 2 - 25;
+            
+            updateTimer();
+            updateScore();
+
+            // 타이머 시작
+            timerInterval = setInterval(() => {
+                gameTime--;
+                updateTimer();
+                
+                // 30초 생존 성공 → 클리어
+                if (gameTime <= 0) {
+                    gameClear();
+                }
+            }, 1000);
+
+            gameLoop();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            clearInterval(timerInterval);
+            
+            document.getElementById('survivalTime').textContent = 30 - gameTime;
+            document.getElementById('gameOverScreen').style.display = 'block';
+        }
+
+        function gameClear() {
+            gameRunning = false;
+            clearInterval(timerInterval);
+            
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('clearScreen').style.display = 'block';
+        }
+
+        function restartGame() {
+            document.getElementById('gameOverScreen').style.display = 'none';
+            document.getElementById('clearScreen').style.display = 'none';
+            startGame();
+        }
+
+        // ========================================
+        // 🚀 초기화
+        // ========================================
+        document.getElementById('startScreen').style.display = 'block';
+    </script>
+</body>
+</html>
